@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教師即時教學診斷看板</title>
+    <!-- 引入 Tailwind CSS 用於自適應排版與美化介面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Firebase Web SDK (Compat 版本，便於 CDN 直接引入) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen p-6 font-sans">
+
+    <!-- 主容器 -->
+    <div class="max-w-6xl mx-auto flex flex-col gap-6">
+        
+        <!-- 上方：看板標題與即時統計 -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="text-3xl">📊</span>
+                    <h1 class="text-2xl font-bold text-slate-800">教師即時教學診斷看板</h1>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">即時監控班級答題狀況、分數與觀念盲點 (Firebase Real-time 連接)</p>
+            </div>
+            <!-- 模擬控制區 -->
+            <div class="flex gap-2">
+                <button onclick="simulateStudentData()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold py-2 px-4 rounded-xl text-xs transition-colors border border-indigo-200">
+                    🧪 模擬全班作答數據 (免設定測試)
+                </button>
+                <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold py-2 px-3 rounded-xl flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 即時連線中
+                </span>
+            </div>
+        </div>
+
+        <!-- 頂部卡片：三個核心班級指標 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-bold text-slate-400 block mb-1">班級參與人數</span>
+                    <span id="active-students" class="text-3xl font-black text-slate-800">0</span> <span class="text-slate-400 text-xs">人正在練習</span>
+                </div>
+                <span class="text-3xl bg-indigo-50 p-3 rounded-2xl">👥</span>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-bold text-slate-400 block mb-1">班級平均總分</span>
+                    <span id="class-avg" class="text-3xl font-black text-indigo-600">0</span> <span class="text-slate-400 text-xs">分</span>
+                </div>
+                <span class="text-3xl bg-amber-50 p-3 rounded-2xl">🏆</span>
+            </div>
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <span class="text-xs font-bold text-slate-400 block mb-1">最卡關知識點</span>
+                    <span id="struggling-concept" class="text-sm font-black text-rose-600 truncate max-w-[200px] block">無</span>
+                </div>
+                <span class="text-3xl bg-rose-50 p-3 rounded-2xl">🔥</span>
+            </div>
+        </div>
+
+        <!-- 中間：左右兩欄 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- 左欄（佔2/3）：學生進度與分數矩陣 -->
+            <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                <h2 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-1.5">📋 學生學習進度矩陣</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-100 text-slate-400 text-xs font-bold">
+                                <th class="pb-3 w-28">學生姓名</th>
+                                <th class="pb-3 w-28">目前進度</th>
+                                <th class="pb-3 w-20">當前分數</th>
+                                <th class="pb-3">卡關知識點 / 診斷反饋</th>
+                            </tr>
+                        </thead>
+                        <tbody id="student-table-body" class="divide-y divide-slate-100 text-sm">
+                            <tr>
+                                <td colspan="4" class="text-center py-12 text-slate-400 text-xs">目前暫無作答數據，您可以點擊右上方按鈕「模擬全班數據」進行測試。</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 右欄（佔1/3）：班級學習危機牆與即時動態 -->
+            <div class="flex flex-col gap-6">
+                
+                <!-- 班級學習危機牆 (按出錯知識點排序) -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                    <h2 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-1.5">🔥 班級學習觀念危機牆</h2>
+                    <div id="crisis-wall" class="flex flex-col gap-3 min-h-[150px] justify-center text-center">
+                        <span class="text-slate-400 text-xs py-8">暫無統計資料</span>
+                    </div>
+                </div>
+
+                <!-- 即時答題動態串流 (Live Feed) -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 flex-grow">
+                    <h2 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-1.5">⚡ 班級最新答題動態</h2>
+                    <div id="live-feed" class="flex flex-col gap-3 max-h-[250px] overflow-y-auto">
+                        <div class="text-slate-400 text-xs text-center py-12">等待學生提交答案...</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 腳本邏輯 -->
+    <script>
+        // ==================== 【串接 Firebase】專屬憑證區 (請在此處替換) ====================
+        const firebaseConfig = {
+            apiKey: "AIzaSyBAts0U7r9bACQYx1w_plAlH1LrPrxLW7c",
+  authDomain: "math-practice-system.firebaseapp.com",
+  projectId: "math-practice-system",
+  storageBucket: "math-practice-system.firebasestorage.app",
+  messagingSenderId: "192907879246",
+  appId: "1:192907879246:web:0194c98122228cbbc0741f",
+  measurementId: "G-9QYCJT2CW3"
+        };
+        
+        // 初始化 Firebase [1]
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        
+        // 啟動實體監聽
+        listenToStudentData();
+
+        // ==================== 全域數據狀態 ====================
+        let studentsData = {}; 
+
+        // ==================== 核心統計與渲染邏輯 ====================
+        function updateDashboard() {
+            const studentList = Object.values(studentsData);
+            const activeStudentsCount = studentList.length;
+            document.getElementById('active-students').innerText = activeStudentsCount;
+
+            if (activeStudentsCount === 0) return;
+
+            // 1. 計算班級平均分數
+            const totalScore = studentList.reduce((acc, curr) => acc + curr.score, 0);
+            const avg = Math.round(totalScore / activeStudentsCount);
+            document.getElementById('class-avg').innerText = avg;
+
+            // 2. 統計各知識點的錯誤次數
+            const conceptErrors = {};
+            studentList.forEach(student => {
+                student.wrongTags.forEach(tag => {
+                    conceptErrors[tag] = (conceptErrors[tag] || 0) + 1;
+                });
+            });
+
+            // 3. 找出最卡關的知識點
+            let mostStruggling = "無";
+            let maxErr = 0;
+            const errorList = [];
+            
+            for (const [tag, count] of Object.entries(conceptErrors)) {
+                errorList.push({ tag, count });
+                if (count > maxErr) {
+                    maxErr = count;
+                    mostStruggling = `${tag} (${count}人次)`;
+                }
+            }
+            document.getElementById('struggling-concept').innerText = mostStruggling;
+
+            // 4. 渲染觀念危機牆（按錯誤次數降冪排列）
+            errorList.sort((a, b) => b.count - a.count);
+            const crisisWall = document.getElementById('crisis-wall');
+            crisisWall.innerHTML = '';
+            
+            if (errorList.length === 0) {
+                crisisWall.innerHTML = '<span class="text-slate-400 text-xs py-8">目前全班表現完美！無卡關觀念。</span>';
+            } else {
+                errorList.forEach(item => {
+                    const pct = Math.min(100, Math.round((item.count / activeStudentsCount) * 100));
+                    const row = document.createElement('div');
+                    row.className = "flex flex-col gap-1";
+                    row.innerHTML = `
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="font-bold text-slate-700">${item.tag}</span>
+                            <span class="text-rose-600 font-semibold">${item.count} 人卡關</span>
+                        </div>
+                        <div class="w-full bg-slate-100 h-2 rounded-full">
+                            <div class="bg-rose-500 h-2 rounded-full" style="width: ${pct}%"></div>
+                        </div>
+                    `;
+                    crisisWall.appendChild(row);
+                });
+            }
+
+            // 5. 渲染學生列表矩陣
+            const tableBody = document.getElementById('student-table-body');
+            tableBody.innerHTML = '';
+
+            studentList.forEach(student => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50/50 transition-colors";
+                
+                const scoreColor = student.score >= 80 ? 'text-emerald-600' : (student.score >= 50 ? 'text-amber-500' : 'text-rose-500');
+                const progressPct = student.progress * 10;
+                
+                let errorTagsHTML = "";
+                if (student.wrongTags.length === 0) {
+                    errorTagsHTML = `<span class="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-1 rounded-full">表現極佳 (全對中)</span>`;
+                } else {
+                    student.wrongTags.forEach(tag => {
+                        errorTagsHTML += `<span class="text-[11px] text-rose-700 font-semibold bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-md mr-1.5 inline-block mb-1">${tag}</span>`;
+                    });
+                }
+
+                tr.innerHTML = `
+                    <td class="py-4 font-bold text-slate-800">${student.name}</td>
+                    <td class="py-4">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-slate-500">${student.progress} / 10</span>
+                            <div class="w-20 bg-slate-100 h-1.5 rounded-full">
+                                <div class="bg-indigo-600 h-1.5 rounded-full" style="width: ${progressPct}%"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="py-4 font-black ${scoreColor}">${student.score} 分</td>
+                    <td class="py-4 max-w-xs">${errorTagsHTML}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+
+        // ==================== 4. 監聽 Firebase 數據流 ====================
+        function listenToStudentData() {
+            if (!db) return;
+            
+            // 監聽 submissions 資料庫 (依時間升冪，便於依照做答順序重構學生狀態) [1]
+            db.collection("student_submissions")
+              .orderBy("timestamp", "asc")
+              .onSnapshot((snapshot) => {
+                  snapshot.docChanges().forEach((change) => {
+                      if (change.type === "added") {
+                          const data = change.doc.data();
+                          handleIncomingData(data);
+                      }
+                  });
+              });
+        }
+
+        // 解析新收到的學生作答紀錄
+        function handleIncomingData(data) {
+            const name = data.student_name;
+            
+            if (!studentsData[name]) {
+                studentsData[name] = {
+                    name: name,
+                    progress: 0,
+                    score: 0,
+                    wrongTags: []
+                };
+            }
+
+            // 更新該學生最新進度與得分
+            if (data.question_index >= studentsData[name].progress) {
+                studentsData[name].progress = data.question_index;
+                studentsData[name].score = data.score;
+            }
+            
+            // 記錄錯題知識點
+            if (!data.is_correct && data.tag) {
+                if (!studentsData[name].wrongTags.includes(data.tag)) {
+                    studentsData[name].wrongTags.push(data.tag);
+                }
+            }
+
+            addLiveFeed(data);
+            updateDashboard();
+        }
+
+        function addLiveFeed(data) {
+            const feedContainer = document.getElementById('live-feed');
+            
+            if (feedContainer.innerHTML.includes("等待學生")) feedContainer.innerHTML = '';
+
+            const feedItem = document.createElement('div');
+            feedItem.className = "bg-slate-50 border border-slate-100 p-3 rounded-xl text-xs flex justify-between items-center animate-fade-in";
+            
+            const statusIcon = data.is_correct ? "🟢" : "🔴";
+            const statusText = data.is_correct ? "回答正確" : "回答錯誤";
+            const tagText = data.tag ? `[${data.tag}]` : "";
+
+            feedItem.innerHTML = `
+                <div>
+                    <span class="font-bold text-slate-800">${data.student_name}</span> 
+                    <span class="text-slate-500">正在作答第 ${data.question_index} 題</span>
+                    <span class="block text-[10px] text-slate-400 mt-0.5">${tagText} ${statusText}</span>
+                </div>
+                <span class="text-lg">${statusIcon}</span>
+            `;
+
+            feedContainer.insertBefore(feedItem, feedContainer.firstChild);
+
+            if (feedContainer.children.length > 6) {
+                feedContainer.removeChild(feedContainer.lastChild);
+            }
+        }
+
+        // ==================== 5. 🧪 班級數據模擬器 ====================
+        const mockNames = ["林小明", "張大同", "王美美", "許大華", "陳阿亮", "李曉婷"];
+        const mockTags = ["帶分數退位借位", "60進位規格", "跨午前午後計算", "日時24進退位", "隱藏邊與複合周長", "周長與面積單位混淆", "分數通分觀念"];
+        
+        function simulateStudentData() {
+            let simCount = 0;
+            const timer = setInterval(() => {
+                if (simCount >= 18) {
+                    clearInterval(timer);
+                    return;
+                }
+                const randomName = mockNames[Math.floor(Math.random() * mockNames.length)];
+                const studentState = studentsData[randomName] || { progress: 0, score: 0, wrongTags: [] };
+                const nextProg = studentState.progress + 1;
+                
+                if (nextProg > 10) {
+                    simCount++;
+                    return;
+                }
+
+                const isCorrect = Math.random() > 0.45; 
+                let scoreEarned = 0;
+                let mockTag = "";
+
+                if (isCorrect) {
+                    const gotHint = Math.random() > 0.8; 
+                    scoreEarned = gotHint ? 7 : 10;
+                } else {
+                    mockTag = mockTags[Math.floor(Math.random() * mockTags.length)];
+                }
+
+                const fakeData = {
+                    student_name: randomName,
+                    question_index: nextProg,
+                    is_correct: isCorrect,
+                    score: studentState.score + scoreEarned,
+                    tag: mockTag
+                };
+
+                handleIncomingData(fakeData);
+                simCount++;
+            }, 1000); 
+        }
+    </script>
+</body>
+</html>
